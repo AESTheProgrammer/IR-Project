@@ -4,8 +4,12 @@ class Node:
         self.indexes = list()
         self.doc_id: int = doc_id
 
+    @property
     def count(self):  # tf
         return len(self.indexes)
+
+    def __lt__(self, other):
+        return self.count < other.count
 
 
 # this linked list is sorted based on the doc_id
@@ -13,7 +17,7 @@ class LinkedList:
     """
     Attributes
     ----------
-    count : int
+    coll_freq : int
         total number of indexes inside the linked list which is sum of count from each Node
     
     Methods
@@ -26,11 +30,11 @@ class LinkedList:
 
     def __init__(self):
         self.head: Node = None
-        self.count = 0
+        self.coll_freq = 0
         self.size = 0  # idf
 
     def insert(self, new_node: Node):
-        self.count += new_node.count()
+        self.coll_freq += new_node.count
         if self.head is None:
             self.head = new_node
             return
@@ -44,6 +48,7 @@ class LinkedList:
     def remove(self, node: Node):
         prev = None
         curr = self.head
+        self.coll_freq -= node.count
         while curr and curr is not node:
             prev = curr
             curr = curr.next
@@ -63,5 +68,5 @@ class LinkedList:
     def print_list(self):
         curr_node = self.head
         while curr_node:
-            print(f"<doc_id: {curr_node.doc_id}, count: {curr_node.count()}, indexes: {curr_node.indexes}>")
+            print(f"<doc_id: {curr_node.doc_id}, coll_freq: {curr_node.count}, indexes: {curr_node.indexes}>")
             curr_node = curr_node.next
