@@ -37,6 +37,8 @@ class LinkedList:
         self.coll_freq += new_node.count
         if self.head is None:
             self.head = new_node
+            self.head.next = None
+            self.size += 1
             return
         curr_node = self.head
         while curr_node.next:  # and curr_node.next.doc_id < new_node.doc_id:

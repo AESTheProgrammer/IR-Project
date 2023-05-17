@@ -1,15 +1,11 @@
 # -*- coding: UTF-8 -*- 
 from __future__ import unicode_literals
 
-import sys
-
 import copy
 import json
 import my_linked_list as mll
-import pickle
 import heapq
 from hazm import *
-from dataclasses import dataclass
 from math import log, pow
 
 with open("IR_data_news_12k.json", "r") as read_file:
@@ -20,10 +16,14 @@ stemmer = Stemmer()
 tokenizer = WordTokenizer()
 lemmatizer = Lemmatizer()
 doc_count = 0
-dictionary = {}
-docs_tokens = [[]]
-docs_tokens_sets = [{str}]
-normalization_factors = [float]
+dictionary: {str, mll.LinkedList} = dict()
+champ_dict: {str, mll.LinkedList} = dict()
+docs_tokens: list[list[int]]
+docs_tokens_sets = [set[str]]
+normalization_factors: [float]
+high_idf_terms_count = 5
+k_docs: int = 3
+champ_list_size: int = 50
 
 
 class bcolors:
@@ -38,31 +38,20 @@ class bcolors:
     UNDERLINE = '\033[4m'
 
 
-@dataclass
-class Snapshot:
-    _dictionary: dict
-    _docs_tokens: list[list[int]]
-
-    @property
-    def dictionary(self):
-        return self._dictionary
-
-    @property
-    def docs_tokens(self):
-        return self._docs_tokens
-
-
 def check_system(collection) -> None:
     """check to see if the systems work"""
     for i in range(50):
         print(f'URL: {collection[str(i)]["url"]}\ntitle: {collection[str(i)]["title"]}')
 
 
-def build_tokens_lists(collection) -> list[list[int]]:
+def build_tokens_lists(collection):
     """build tokens lists"""
+    global docs_tokens, doc_count, normalization_factors
     docs_tokens = list()
-    print(len(data.keys()))
-    for i in range(12202):  # len(data.keys())):  # data.keys():
+    print(f"number of documents: {len(data.keys())}")
+    print("enter the number of documents to be processed.")
+    num = int(input())
+    for i in range(num):  # len(data.keys())):  # data.keys():
         single_news = str((collection[str(i)]['content']))  # .encode("utf-8"))
         normalized = normalizer.normalize(single_news)
         tokenized = word_tokenize(normalized)
@@ -70,7 +59,7 @@ def build_tokens_lists(collection) -> list[list[int]]:
         docs_tokens.append(stemmed)
     remove_stopwords_and_punctuations(docs_tokens)
     doc_count = len(docs_tokens)
-    return docs_tokens
+    normalization_factors = [0.0] * len(docs_tokens)
 
 
 def remove_stopwords_and_punctuations(docs_tokens: list[list[int]]) -> None:
@@ -85,10 +74,10 @@ def remove_stopwords_and_punctuations(docs_tokens: list[list[int]]) -> None:
                 li[i] = '\0'
 
 
-def build_dict():
+def build_dict() -> None:
     """build an unordered dictionary based on hash"""
+    global dictionary
     temp_dict = dict()
-    dictionary = dict()
     i = 0
     for doc_tokens in docs_tokens:
         # `j` is the current index of the word in a document
@@ -112,7 +101,6 @@ def build_dict():
             dictionary[word].insert(temp_dict[word])
         temp_dict.clear()
         i += 1
-    return dictionary
 
 
 def retrieve_docs(word: str) -> mll.LinkedList:
@@ -142,15 +130,14 @@ def ll_to_arr(ll: mll.LinkedList) -> list[list[int]]:
     curr = ll.head
     while curr:
         arr[0].append(curr.doc_id)
-        arr[1].append(curr.count())
+        arr[1].append(curr.count)
         curr = curr.next
     return arr
 
 
 def arr_to_ll(array: list[list[int]]) -> mll.LinkedList:
-    """convert a 2d array into a linked list
-        array[0] is filled with doc_id and array[1]
-        is filled with number of repetitions"""
+    """convert a 2d array into a linked list array[0] is filled
+    with doc_id and array[1] is filled with number of repetitions"""
     newList = mll.LinkedList()
     for i in range(len(array[0])):
         newNode = mll.Node(array[0][i])
@@ -167,27 +154,27 @@ def or_docs(list1: mll.LinkedList, list2: mll.LinkedList) -> mll.LinkedList:
     while node1 and node2:
         if node1.doc_id == node2.doc_id:
             final_list[0].append(node1.doc_id)
-            final_list[1].append(node1.count() + node2.count())
+            final_list[1].append(node1.count + node2.count)
             node1 = node1.next
             node2 = node2.next
         elif node1.doc_id > node2.doc_id:
             final_list[0].append(node2.doc_id)
-            final_list[1].append(node2.count())
+            final_list[1].append(node2.count)
             node2 = node2.next
         else:
             final_list[0].append(node1.doc_id)
-            final_list[1].append(node1.count())
+            final_list[1].append(node1.count)
             node1 = node1.next
 
     if not node1:
         while node2:
             final_list[0].append(node2.doc_id)
-            final_list[1].append(node2.count())
+            final_list[1].append(node2.count)
             node2 = node2.next
     else:
         while node1:
             final_list[0].append(node1.doc_id)
-            final_list[1].append(node1.count())
+            final_list[1].append(node1.count)
             node1 = node1.next
 
     return arr_to_ll(final_list)
@@ -202,7 +189,7 @@ def and_docs(list1: mll.LinkedList, list2: mll.LinkedList) -> mll.LinkedList:
         if node1.doc_id == node2.doc_id:
             # this list must be sorted
             final_list[0].append(node1.doc_id)
-            final_list[1].append(node1.count() + node2.count())
+            final_list[1].append(node1.count + node2.count)
             node1 = node1.next
             node2 = node2.next
         elif node1.doc_id > node2.doc_id:
@@ -222,7 +209,7 @@ def not_and_docs(list1: mll.LinkedList, list2: mll.LinkedList) -> mll.LinkedList
     while node1:
         if node1 and not node2 or node1.doc_id < node2.doc_id:
             final_list[0].append(node1.doc_id)
-            final_list[1].append(node1.count())
+            final_list[1].append(node1.count)
             node1 = node1.next
         elif node1.doc_id == node2.doc_id:
             node1 = node1.next
@@ -334,7 +321,6 @@ def parse_query(query: str) -> list[str]:
     x = query.strip()
     y = x.split(" ")
     i, word, z = 0, "", []
-    # print(y)
     while i in range(len(y)):
         if y[i][0] == "\"":
             z.append("$")  # '$' indicates start and end of the expression
@@ -378,53 +364,6 @@ def retrieve_sentences(docs: list[int], tokens: set[str]) -> None:
                         print(sent)
 
 
-def take_snapshot():
-    """ takes snapshot from the current status of the running program or process """
-    global dictionary
-    global docs_tokens
-    snapshot = Snapshot(_dictionary=dictionary, _docs_tokens=docs_tokens)
-    snapshot_file = open("snapshot.obj", "wb")
-    sys.setrecursionlimit(10000)
-    pickle.Pickler(snapshot_file, protocol=pickle.HIGHEST_PROTOCOL).dump(pickle.dumps(snapshot))
-    snapshot_file.close()
-
-
-def restore_from_snapshot():
-    """ restore a previously taken snapshot """
-    global dictionary
-    global docs_tokens
-    snapshot_file = open("snapshot.obj", "rb")
-    pickled = pickle.load(snapshot_file)
-    snapshot: Snapshot = pickle.loads(pickled)
-    dictionary = snapshot.dictionary
-    docs_tokens = snapshot.docs_tokens
-    snapshot_file.close()
-
-
-def run():
-    """
-        this is the main engine of the search engine
-    """
-    global dictionary
-    global docs_tokens
-    global docs_tokens_sets
-    docs_tokens = build_tokens_lists(data)
-    for li in docs_tokens:
-        docs_tokens_sets.append(set(li))
-    dictionary = build_dict()
-    """main loop of the engine"""
-    while True:
-        query = input("پرسمان را وارد کنید:")
-        # query = "\"خبر های ریاست\""
-        print(query)
-        tokens_and_docs = process_query(query)
-        print(tokens_and_docs)
-        retrieve_sentences(tokens_and_docs[1], tokens_and_docs[0])
-
-
-run()
-
-
 def get_weight(hit: mll.LinkedList, doc_id: int) -> float:
     """
     Args:
@@ -436,95 +375,90 @@ def get_weight(hit: mll.LinkedList, doc_id: int) -> float:
         idf: inverse document frequency
 
     Returns:
-        weight of the term
+        weight of the term in the document
     """
     global docs_tokens
-    tf = hit.get(doc_id).count()
+    node = hit.get(doc_id)
+    tf = 1 if not node else node.count
     df = hit.size
     N = len(docs_tokens)
     return (1 + log(tf, 10)) * (log(N / df, 10))
 
 
-def prepare_normal_factors(my_dict: {str: mll.LinkedList}, my_docs_tokens: [[int]]) -> [float]:
+def get_normal_factors(doc_id: int) -> [float]:
     """
     Args:
-        my_dict: initial dictionary before scoring the documents
-        my_docs_tokens: each row is the tokens in a single document after \
-                        moving exiting the linguistic module
-
+        doc_id: id of the document whose normalization factor is required
     Returns:
         a list containing vector size of each document for later use in scoring
-
     """
-    vectors_size = [float]
-    for i in range(len(my_docs_tokens)):
-        total_weight = 0
-        for token in my_docs_tokens[i]:
-            hit = my_dict[token]
-            total_weight += pow(get_weight(hit, i), 2)
-        vectors_size.append(pow(total_weight, 0.5))
-    return vectors_size
+    global docs_tokens
+    if normalization_factors[doc_id] != 0.0:
+        return normalization_factors[doc_id]
+    total_weight = 0
+    for token in docs_tokens[doc_id]:
+        if dictionary.get(token):
+            hit = dictionary[token]
+            total_weight += pow(get_weight(hit, doc_id), 2)
+    normalization_factors[doc_id] = pow(total_weight, 0.5)
+    return normalization_factors[doc_id]
 
 
-def build_champion_list(initial_dict: dict) -> dict:
+def build_champion_list(base_dict: dict):
     """
     Args:
-        initial_dict: normal dictionary
+        base_dict: normal dictionary
 
     Returns:
         a dictionary but filled with champion postings list
     """
+    global champ_dict, champ_list_size
     max_heap = []
-    champ_dict = {}
-    for term in initial_dict:
-        ll = initial_dict[term]
+    for term in base_dict:
+        ll = base_dict[term]
         curr = ll.head
         while curr:
             heapq.heappush(max_heap, curr)
-        r = min(100, ll.size)
+            curr = curr.next
+        r = min(champ_list_size, ll.size)
         champ_list = heapq.nlargest(r, max_heap,
                                     lambda node: node.count)  # get the r most relevant documents (based of tf)
-        sorted(champ_list, key=lambda node: node.doc_id)  # sort them based on document id
+        champ_list = sorted(champ_list, key=lambda node: node.doc_id)  # sort them based on document id
         champ_ll = mll.LinkedList()
         for i in range(len(champ_list)):
             champ_ll.insert(copy.copy(champ_list[i]))  # a shallow copy from objects
         champ_dict[term] = champ_ll
 
-    return champ_dict
 
-
-def get_jaccard(set1: {str}, set2: {str}):
+def jaccard_scores(query_terms: set[str], docs: [int]) -> [int]:
     """
     Args:
-        set1: first set
-        set2: second set
+        docs: id of the documents retrieved from champion lists
+        query_terms: terms in the query
 
     Returns:
         calculates the jaccard coefficient
     """
-    intersection = set1.intersection(set2)
-    union = set1.union(set2)
-    return len(intersection) / len(union)
+    scores = [0.0] * len(docs)
+    for doc_id in docs:
+        intersection = docs_tokens_sets[doc_id].intersection(query_terms)
+        union = docs_tokens_sets[doc_id].union(query_terms)
+        scores.append(len(intersection) / len(union))
+    return scores
 
 
-def build_token_count_dict(query: [str]):
-    """
-    Args:
-        query: query to be indexed
-
-    Returns:
-        returns a dictionary that maps a term in the query to the number of its occurrences
-    """
-    tok_count_dict = {}
-    for token in query:
-        if token in tok_count_dict:
-            tok_count_dict[token] += 1
-        else:
-            tok_count_dict[token] = 1
-    return tok_count_dict
+# def get_tok_set(query: [str]) -> set[str]:
+#     """
+#     Args: query to be indexed
+#     Returns: returns a set containing terms in the query
+#     """
+#     tok_set = set()
+#     for token in query:
+#         tok_set.add(token)
+#     return tok_set
 
 
-def cosine_score(query: [str], docs):
+def cosine_score(query: set[str], docs: [int]):
     """
     Args:
         query: tokens found in the query (after being processed in linguistic module)
@@ -533,22 +467,23 @@ def cosine_score(query: [str], docs):
     Returns:
         a list of scores for each of the documents in `docs`
     """
-    query_dict = build_token_count_dict(query)
-    N = len(docs_tokens)
-    scores = [0 * len(docs)]
+    global high_idf_terms_count
+    query_dict = get_top_r_idf(query, high_idf_terms_count)
+    # N = len(docs_tokens)
+    scores = [0] * len(docs)
     for term in query_dict:
         ll = dictionary[term]
-        wtq = (1 + log(query_dict[term])) * (log(N / ll.size, 10))
+        wtq = 1  # (1 + log(query_dict[term])) * (log(N / ll.size, 10))
         for i in range(len(docs)):
             scores[i] += wtq * get_weight(ll, docs[i])
 
     for i in range(len(docs)):
-        scores[i] /= normalization_factors[docs[i]]
+        scores[i] /= get_normal_factors(docs[i])
 
     return scores
 
 
-def choose_top_k(docs: [int], scores: [float], k: int) -> [int]:
+def get_top_k_docs(docs: [int], scores: [float], k: int) -> [int]:
     """
     Args:
         scores: score list of documents
@@ -559,31 +494,77 @@ def choose_top_k(docs: [int], scores: [float], k: int) -> [int]:
         list of top k documents
     """
     max_heap = []
-    for i in range(docs):
+    for i in range(len(docs)):
         heapq.heappush(max_heap, (docs[i], scores[i]))
     return [t[0] for t in heapq.nlargest(k, max_heap, key=lambda tup: tup[1])]
 
 
-def get_top_r_idf(my_dict: dict, r: int) -> [str]:
+def get_top_r_idf(my_dict: set[str], r: int) -> [str]:
     """
     Args:
         my_dict: initial dictionary built for inverted index
         r: number of highest idf
-
     Returns:
         a list composed of top r terms with highest idf
     """
+    global dictionary
     max_heap = []
     for term in my_dict:
-        heapq.heappush(max_heap, (term, my_dict[term].size))
+        heapq.heappush(max_heap, (term, dictionary[term].size))
     return [t[0] for t in heapq.nlargest(r, max_heap, key=lambda tup: tup[1])]
 
-# ========================================================================================================== commented
-# for doc_tokens in docs_tokens:
-#     print(doc_tokens)
-# take_snapshot()
-# restore_from_snapshot()
-# for word in dictionary.keys():
-#     print(f'word: {word}\t\ttotal coll_freq: {dictionary[word].coll_freq})')
-#     dictionary[word].print_list()
-#     print("===========================")
+
+# def get_tok_count_dict(query: [str]):
+#    """
+#    Args:
+#        query: query to be indexed
+#
+#    Returns:
+#        returns a dictionary that maps a term in the query to the number of its occurrences
+#    """
+#    tok_count_dict = {}
+#    for token in query:
+#        if token in tok_count_dict:
+#            tok_count_dict[token] += 1
+#        else:
+#            tok_count_dict[token] = 1
+#    return tok_count_dict
+
+
+def main():
+    global dictionary, docs_tokens, docs_tokens_sets, champ_dict, k_docs
+    build_tokens_lists(data)
+    for li in docs_tokens:
+        docs_tokens_sets.append(set(li))
+    # for x in range(1, 3):
+    #     print(docs_tokens_sets[x])
+    #     print("debug1")
+    #     break
+    build_dict()
+    # for x in dictionary:
+    #     dictionary[x].print_list()
+    #     print(dictionary[x].size)
+    #     print("debug2")
+    #     break
+    build_champion_list(dictionary)
+    dictionary = champ_dict
+    # for x in dictionary:
+    #     dictionary[x].print_list()
+    #     print(dictionary[x].size)
+    #     print("debug3")
+    #     break
+    """ main loop of the engine """
+    while True:
+        query = input("پرسمان را وارد کنید:")
+        tokens_and_docs = process_query(query)
+        print(tokens_and_docs)
+        scores = cosine_score(tokens_and_docs[0], tokens_and_docs[1])
+        print(scores)
+        print(tokens_and_docs[1])
+        candidate_docs = get_top_k_docs(tokens_and_docs[1], scores, min(k_docs, len(tokens_and_docs)))
+        print(candidate_docs)
+        retrieve_sentences(candidate_docs, tokens_and_docs[0])
+
+
+if __name__ == "__main__":
+    main()
