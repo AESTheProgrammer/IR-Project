@@ -1,4 +1,4 @@
-# -*- coding: UTF-8 -*- 
+# -*- coding: UTF-8 -*-
 from __future__ import unicode_literals
 
 import copy
@@ -7,6 +7,7 @@ import my_linked_list as mll
 import heapq
 from hazm import *
 from math import log, pow
+from styles_utility import Styles
 
 with open("IR_data_news_12k.json", "r") as read_file:
     data = json.loads(read_file.read())
@@ -22,20 +23,8 @@ docs_tokens: list[list[int]]
 docs_tokens_sets = [set[str]]
 normalization_factors: [float]
 high_idf_terms_count = 5
-k_docs: int = 3
+k_top_docs: int = 5
 champ_list_size: int = 50
-
-
-class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
 
 
 def check_system(collection) -> None:
@@ -238,7 +227,7 @@ def get_expression_docs(words: list[str]):
     return arr_to_ll(docs_counts)
 
 
-def process_query(query: str) -> tuple[set[str], list[int]]:
+def process_query(query: str) -> tuple[set[str], list[int], set[str]]:
     """process a query and return the result of the query as a list of document ids"""
     parsed_query = parse_query(query)
     print(f"parsed query: {parsed_query}")
@@ -256,12 +245,14 @@ def process_query(query: str) -> tuple[set[str], list[int]]:
                 words = []  # words in the expression
                 while parsed_query[i] != "$":
                     words.append(parsed_query[i])
+                    parsed_query[i] = "none"  # i did this so in the future i dont give score to these terms
                     i += 1
                 ll = get_expression_docs(words)
             else:
                 if not dictionary[parsed_query[i]]:
                     continue
                 ll = dictionary[parsed_query[i]]
+            parsed_query[i] = "none"  # i did this so in the future i dont give score to these terms
             curr_res = not_and_docs(curr_res, ll)
             curr_res_backup = not_and_docs(curr_res_backup, ll)
             i += 1
@@ -298,7 +289,14 @@ def process_query(query: str) -> tuple[set[str], list[int]]:
                                                     reverse=True)]
         final_sorted.extend(final_backup_sorted)
         print(f"backup: {final_backup_sorted}")
-    return tokens, final_sorted
+    if not len(tokens):  # if no term was in the dictionary return an empty list of doc ids
+        final_sorted = []
+    parsed_query = set(parsed_query)
+    if "!" in parsed_query:
+        parsed_query.remove("!")
+    if "$" in parsed_query:
+        parsed_query.remove("$")
+    return tokens, final_sorted, parsed_query
 
 
 def remove_repetitives(res: mll.LinkedList, backup: mll.LinkedList):
@@ -324,12 +322,15 @@ def parse_query(query: str) -> list[str]:
     while i in range(len(y)):
         if y[i][0] == "\"":
             z.append("$")  # '$' indicates start and end of the expression
-            z.append(y[i][1:])
-            i += 1
-            while y[i][-1] != "\"":
-                z.append(y[i])
+            if y[i][-1] != "\"":
+                z.append(y[i][1:])
                 i += 1
-            z.append(y[i][:-1])
+                while y[i][-1] != "\"":
+                    z.append(y[i])
+                    i += 1
+                z.append(y[i][:-1])
+            else:
+                z.append(y[i][1:-1])
             z.append("$")
         else:
             z.append(y[i])
@@ -347,21 +348,24 @@ def retrieve_sentences(docs: list[int], tokens: set[str]) -> None:
         docs = docs[0:5]
     for doc_id in docs:
         title = data[str(doc_id)]['title']
-        print(f'{bcolors.OKBLUE}document id: {doc_id}\ntitle: {title}\nsentences: ')
+        print(f'{Styles.OKBLUE}document id: {doc_id}\ntitle: {title}\nsentences: ')
         sentences = sent_tokenize(data[str(doc_id)]['content'])
         for sent in sentences:
             normalized = normalizer.normalize(sent)
             tokenized = word_tokenize(normalized)
             stemmed = [stemmer.stem(x) for x in tokenized]
             lemmatized = [lemmatizer.lemmatize(x) for x in stemmed]
+            if doc_id == 160:
+                print(sent)
             if any(x in lemmatized for x in tokens):  # normal words expressions
-                print(f"{bcolors.OKGREEN}{sent}")
-            for token in tokens:
+                print(f"{Styles.OKGREEN}{sent}")
+            for token in tokens:  # look for expressions
                 if token[0] == "$":
                     words = token[1:].strip().split(" ")
                     # print(f"words: {words}'")
                     if is_subarray(lemmatized, words):
                         print(sent)
+    print(f'{Styles.ENDC}')
 
 
 def get_weight(hit: mll.LinkedList, doc_id: int) -> float:
@@ -413,8 +417,8 @@ def build_champion_list(base_dict: dict):
         a dictionary but filled with champion postings list
     """
     global champ_dict, champ_list_size
-    max_heap = []
     for term in base_dict:
+        max_heap = []
         ll = base_dict[term]
         curr = ll.head
         while curr:
@@ -443,19 +447,8 @@ def jaccard_scores(query_terms: set[str], docs: [int]) -> [int]:
     for doc_id in docs:
         intersection = docs_tokens_sets[doc_id].intersection(query_terms)
         union = docs_tokens_sets[doc_id].union(query_terms)
-        scores.append(len(intersection) / len(union))
+        scores.append(float(len(intersection)) / len(union))
     return scores
-
-
-# def get_tok_set(query: [str]) -> set[str]:
-#     """
-#     Args: query to be indexed
-#     Returns: returns a set containing terms in the query
-#     """
-#     tok_set = set()
-#     for token in query:
-#         tok_set.add(token)
-#     return tok_set
 
 
 def cosine_score(query: set[str], docs: [int]):
@@ -496,7 +489,8 @@ def get_top_k_docs(docs: [int], scores: [float], k: int) -> [int]:
     max_heap = []
     for i in range(len(docs)):
         heapq.heappush(max_heap, (docs[i], scores[i]))
-    return [t[0] for t in heapq.nlargest(k, max_heap, key=lambda tup: tup[1])]
+    return ([t[0] for t in heapq.nlargest(k, max_heap, key=lambda tup: tup[1])],
+            [t[1] for t in heapq.nlargest(k, max_heap, key=lambda tup: tup[1])]) # remove this
 
 
 def get_top_r_idf(my_dict: set[str], r: int) -> [str]:
@@ -510,9 +504,52 @@ def get_top_r_idf(my_dict: set[str], r: int) -> [str]:
     global dictionary
     max_heap = []
     for term in my_dict:
-        heapq.heappush(max_heap, (term, dictionary[term].size))
+        if term in dictionary:
+            heapq.heappush(max_heap, (term, dictionary[term].size))
     return [t[0] for t in heapq.nlargest(r, max_heap, key=lambda tup: tup[1])]
 
+
+def main():
+    global dictionary, docs_tokens, docs_tokens_sets, champ_dict, k_top_docs
+    build_tokens_lists(data)
+    for li in docs_tokens:
+        docs_tokens_sets.append(set(li))
+    build_dict()
+    build_champion_list(dictionary)
+    dictionary = champ_dict
+    while True:
+        query = input("پرسمان را وارد کنید:")
+        tokens_and_docs = process_query(query)
+
+        print("=================================================")
+        print(f"{Styles.HEADER}COSINE SCORING{Styles.FONT_SIZE_NORMAL}")
+        print(f"terms: {tokens_and_docs[0]}")
+        scores = cosine_score(tokens_and_docs[2], tokens_and_docs[1])
+        print(f'scores:\n{scores}')
+        print(f"before choosing top-k docs:\n{tokens_and_docs[1]}")
+        candidate_docs, candidate_scores = get_top_k_docs(tokens_and_docs[1], scores, min(k_top_docs, len(tokens_and_docs[1])))
+        print(f"after choosing top-k docs:\n{candidate_docs}")
+        print(f'scores:\n{candidate_scores}')
+        print([len(docs_tokens[doc]) for doc in candidate_docs])
+        retrieve_sentences(candidate_docs, tokens_and_docs[0])
+
+        print("=================================================")
+        print(f"{Styles.HEADER}JACCARD SCORING{Styles.FONT_SIZE_NORMAL}")
+        print(f"terms: {tokens_and_docs[0]}")
+        scores = jaccard_scores(tokens_and_docs[2], tokens_and_docs[1])
+        print(f'scores:\n{scores}')
+        print(f"before choosing top-k docs:\n{tokens_and_docs[1]}")
+        candidate_docs, candidate_scores = get_top_k_docs(tokens_and_docs[1], scores, min(k_top_docs, len(tokens_and_docs[1])))
+        print(f"after choosing top-k docs:\n{candidate_docs}")
+        print(f'scores:\n{candidate_scores}')
+        print(f'size of docs:\n{[len(docs_tokens[doc]) for doc in candidate_docs]}')
+        retrieve_sentences(candidate_docs, tokens_and_docs[0])
+
+
+if __name__ == "__main__":
+    main()
+
+# sorting objects, copying speed
 
 # def get_tok_count_dict(query: [str]):
 #    """
@@ -531,40 +568,3 @@ def get_top_r_idf(my_dict: set[str], r: int) -> [str]:
 #    return tok_count_dict
 
 
-def main():
-    global dictionary, docs_tokens, docs_tokens_sets, champ_dict, k_docs
-    build_tokens_lists(data)
-    for li in docs_tokens:
-        docs_tokens_sets.append(set(li))
-    # for x in range(1, 3):
-    #     print(docs_tokens_sets[x])
-    #     print("debug1")
-    #     break
-    build_dict()
-    # for x in dictionary:
-    #     dictionary[x].print_list()
-    #     print(dictionary[x].size)
-    #     print("debug2")
-    #     break
-    build_champion_list(dictionary)
-    dictionary = champ_dict
-    # for x in dictionary:
-    #     dictionary[x].print_list()
-    #     print(dictionary[x].size)
-    #     print("debug3")
-    #     break
-    """ main loop of the engine """
-    while True:
-        query = input("پرسمان را وارد کنید:")
-        tokens_and_docs = process_query(query)
-        print(tokens_and_docs)
-        scores = cosine_score(tokens_and_docs[0], tokens_and_docs[1])
-        print(scores)
-        print(tokens_and_docs[1])
-        candidate_docs = get_top_k_docs(tokens_and_docs[1], scores, min(k_docs, len(tokens_and_docs)))
-        print(candidate_docs)
-        retrieve_sentences(candidate_docs, tokens_and_docs[0])
-
-
-if __name__ == "__main__":
-    main()
