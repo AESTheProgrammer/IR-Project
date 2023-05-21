@@ -22,9 +22,10 @@ champ_dict: {str, mll.LinkedList} = dict()
 docs_tokens: list[list[int]]
 docs_tokens_sets = [set[str]]
 normalization_factors: [float]
-high_idf_terms_count = 5
-k_top_docs: int = 5
-champ_list_size: int = 50
+HIGH_IDF_TERMS_COUNT = 5
+K_TOP_DOCS: int = 5
+TOP_IDF_QUERY_TERMS = 4
+CHAMP_LIST_SIZE: int = 75
 
 
 def check_system(collection) -> None:
@@ -40,27 +41,28 @@ def build_tokens_lists(collection):
     print(f"number of documents: {len(data.keys())}")
     print("enter the number of documents to be processed.")
     num = int(input())
-    for i in range(num):  # len(data.keys())):  # data.keys():
-        single_news = str((collection[str(i)]['content']))  # .encode("utf-8"))
+    for i in range(num):
+        single_news = str((collection[str(i)]['content']))
         normalized = normalizer.normalize(single_news)
         tokenized = word_tokenize(normalized)
+        remove_stopwords_and_punctuations(tokenized)
         stemmed = [lemmatizer.lemmatize(stemmer.stem(x)) for x in tokenized]
         docs_tokens.append(stemmed)
-    remove_stopwords_and_punctuations(docs_tokens)
+    # remove_stopwords_and_punctuations()
     doc_count = len(docs_tokens)
     normalization_factors = [0.0] * len(docs_tokens)
 
 
-def remove_stopwords_and_punctuations(docs_tokens: list[list[int]]) -> None:
+def remove_stopwords_and_punctuations(li: [str]) -> None:
     """remove stopwords and punctuations"""
     stop_words = set(stopwords_list())
     punctuations = [',', ';', '،', '.', '[', ']', '؛', '(', ')', '{', '}', '?', ':']
-    for li in docs_tokens:
-        for i in range(0, len(li)):
-            if li[i] in stop_words:
-                li[i] = ''
-            elif li[i] in punctuations:
-                li[i] = '\0'
+    # for li in docs_tokens:
+    for i in range(0, len(li)):
+        if li[i] in stop_words:
+            li[i] = ''
+        elif li[i] in punctuations:
+            li[i] = '\0'
 
 
 def build_dict() -> None:
@@ -185,8 +187,6 @@ def and_docs(list1: mll.LinkedList, list2: mll.LinkedList) -> mll.LinkedList:
             node2 = node2.next
         else:
             node1 = node1.next
-    # final_list[0], final_list[1] = [y for _, y in sorted(zip(final_list[1], final_list[0]), reverse=True)], \
-    #                               sorted(final_list[1])
     return arr_to_ll(final_list)
 
 
@@ -205,8 +205,6 @@ def not_and_docs(list1: mll.LinkedList, list2: mll.LinkedList) -> mll.LinkedList
             node2 = node2.next
         else:
             node2 = node2.next
-    # final_list[0], final_list[1] = [y for _, y in sorted(zip(final_list[1], final_list[0]), reverse=True)], \
-    #                                sorted(final_list[1])
     return arr_to_ll(final_list)
 
 
@@ -252,7 +250,7 @@ def process_query(query: str) -> tuple[set[str], list[int], set[str]]:
                 if not dictionary[parsed_query[i]]:
                     continue
                 ll = dictionary[parsed_query[i]]
-            parsed_query[i] = "none"  # i did this so in the future i dont give score to these terms
+                parsed_query[i] = "none"  # i did this so in the future i dont give score to these terms
             curr_res = not_and_docs(curr_res, ll)
             curr_res_backup = not_and_docs(curr_res_backup, ll)
             i += 1
@@ -296,6 +294,8 @@ def process_query(query: str) -> tuple[set[str], list[int], set[str]]:
         parsed_query.remove("!")
     if "$" in parsed_query:
         parsed_query.remove("$")
+    if "none" in parsed_query:
+        parsed_query.remove("none")
     return tokens, final_sorted, parsed_query
 
 
@@ -383,10 +383,10 @@ def get_weight(hit: mll.LinkedList, doc_id: int) -> float:
     """
     global docs_tokens
     node = hit.get(doc_id)
-    tf = 1 if not node else node.count
+    tf = 0 if not node else node.count
     df = hit.size
     N = len(docs_tokens)
-    return (1 + log(tf, 10)) * (log(N / df, 10))
+    return ((1 + log(tf, 10)) if tf != 0 else 0) * (log(N / df, 10))
 
 
 def get_normal_factors(doc_id: int) -> [float]:
@@ -412,11 +412,10 @@ def build_champion_list(base_dict: dict):
     """
     Args:
         base_dict: normal dictionary
-
     Returns:
         a dictionary but filled with champion postings list
     """
-    global champ_dict, champ_list_size
+    global champ_dict, CHAMP_LIST_SIZE
     for term in base_dict:
         max_heap = []
         ll = base_dict[term]
@@ -424,7 +423,7 @@ def build_champion_list(base_dict: dict):
         while curr:
             heapq.heappush(max_heap, curr)
             curr = curr.next
-        r = min(champ_list_size, ll.size)
+        r = min(CHAMP_LIST_SIZE, ll.size)
         champ_list = heapq.nlargest(r, max_heap,
                                     lambda node: node.count)  # get the r most relevant documents (based of tf)
         champ_list = sorted(champ_list, key=lambda node: node.doc_id)  # sort them based on document id
@@ -439,11 +438,10 @@ def jaccard_scores(query_terms: set[str], docs: [int]) -> [int]:
     Args:
         docs: id of the documents retrieved from champion lists
         query_terms: terms in the query
-
     Returns:
         calculates the jaccard coefficient
     """
-    scores = [0.0] * len(docs)
+    scores = list()
     for doc_id in docs:
         intersection = docs_tokens_sets[doc_id].intersection(query_terms)
         union = docs_tokens_sets[doc_id].union(query_terms)
@@ -456,12 +454,11 @@ def cosine_score(query: set[str], docs: [int]):
     Args:
         query: tokens found in the query (after being processed in linguistic module)
         docs: documents that match the query after index elimination
-
     Returns:
         a list of scores for each of the documents in `docs`
     """
-    global high_idf_terms_count
-    query_dict = get_top_r_idf(query, high_idf_terms_count)
+    global HIGH_IDF_TERMS_COUNT
+    query_dict = get_top_r_idf(query, HIGH_IDF_TERMS_COUNT)
     # N = len(docs_tokens)
     scores = [0] * len(docs)
     for term in query_dict:
@@ -482,7 +479,6 @@ def get_top_k_docs(docs: [int], scores: [float], k: int) -> [int]:
         scores: score list of documents
         docs: documents that match the query after index elimination
         k: number of documents to be retrieved
-
     Returns:
         list of top k documents
     """
@@ -490,7 +486,7 @@ def get_top_k_docs(docs: [int], scores: [float], k: int) -> [int]:
     for i in range(len(docs)):
         heapq.heappush(max_heap, (docs[i], scores[i]))
     return ([t[0] for t in heapq.nlargest(k, max_heap, key=lambda tup: tup[1])],
-            [t[1] for t in heapq.nlargest(k, max_heap, key=lambda tup: tup[1])]) # remove this
+            [t[1] for t in heapq.nlargest(k, max_heap, key=lambda tup: tup[1])])  # remove this
 
 
 def get_top_r_idf(my_dict: set[str], r: int) -> [str]:
@@ -510,46 +506,61 @@ def get_top_r_idf(my_dict: set[str], r: int) -> [str]:
 
 
 def main():
-    global dictionary, docs_tokens, docs_tokens_sets, champ_dict, k_top_docs
+    global dictionary, docs_tokens, docs_tokens_sets, champ_dict, K_TOP_DOCS
     build_tokens_lists(data)
     for li in docs_tokens:
         docs_tokens_sets.append(set(li))
     build_dict()
-    build_champion_list(dictionary)
-    dictionary = champ_dict
+    # build_champion_list(dictionary)
+    # dictionary = champ_dict
     while True:
         query = input("پرسمان را وارد کنید:")
         tokens_and_docs = process_query(query)
 
-        print("=================================================")
-        print(f"{Styles.HEADER}COSINE SCORING{Styles.FONT_SIZE_NORMAL}")
-        print(f"terms: {tokens_and_docs[0]}")
-        scores = cosine_score(tokens_and_docs[2], tokens_and_docs[1])
-        print(f'scores:\n{scores}')
-        print(f"before choosing top-k docs:\n{tokens_and_docs[1]}")
-        candidate_docs, candidate_scores = get_top_k_docs(tokens_and_docs[1], scores, min(k_top_docs, len(tokens_and_docs[1])))
-        print(f"after choosing top-k docs:\n{candidate_docs}")
-        print(f'scores:\n{candidate_scores}')
-        print([len(docs_tokens[doc]) for doc in candidate_docs])
-        retrieve_sentences(candidate_docs, tokens_and_docs[0])
+        # print("=================================================")
+        # print(f"{Styles.HEADER}COSINE SCORING{Styles.FONT_SIZE_NORMAL}")
+        # print(f"terms: {tokens_and_docs[0]}")
+        # scores = cosine_score(tokens_and_docs[2], tokens_and_docs[1])
+        # print(f'scores:\n{scores}')
+        # print(f"before choosing top-k docs:\n{tokens_and_docs[1]}")
+        # candidate_docs, candidate_scores = get_top_k_docs(tokens_and_docs[1], scores,
+        #                                                   min(K_TOP_DOCS, len(tokens_and_docs[1])))
+        # print(f"after choosing top-k docs:\n{candidate_docs}")
+        # print(f'scores:\n{candidate_scores}')
+        # print([len(docs_tokens[doc]) for doc in candidate_docs])
+        # retrieve_sentences(candidate_docs, tokens_and_docs[0])
+        retrieve_sentences(tokens_and_docs[1], tokens_and_docs[0])
 
-        print("=================================================")
-        print(f"{Styles.HEADER}JACCARD SCORING{Styles.FONT_SIZE_NORMAL}")
-        print(f"terms: {tokens_and_docs[0]}")
-        scores = jaccard_scores(tokens_and_docs[2], tokens_and_docs[1])
-        print(f'scores:\n{scores}')
-        print(f"before choosing top-k docs:\n{tokens_and_docs[1]}")
-        candidate_docs, candidate_scores = get_top_k_docs(tokens_and_docs[1], scores, min(k_top_docs, len(tokens_and_docs[1])))
-        print(f"after choosing top-k docs:\n{candidate_docs}")
-        print(f'scores:\n{candidate_scores}')
-        print(f'size of docs:\n{[len(docs_tokens[doc]) for doc in candidate_docs]}')
-        retrieve_sentences(candidate_docs, tokens_and_docs[0])
+        # print("=================================================")
+        # print(f"{Styles.HEADER}JACCARD SCORING{Styles.FONT_SIZE_NORMAL}")
+        # print(f"terms: {tokens_and_docs[0]}")
+        # scores = jaccard_scores(tokens_and_docs[2], tokens_and_docs[1])
+        # print(f'scores:\n{scores}')
+        # print(f"before choosing top-k docs:\n{tokens_and_docs[1]}")
+        # candidate_docs, candidate_scores = get_top_k_docs(tokens_and_docs[1], scores,
+        #                                                   min(K_TOP_DOCS, len(tokens_and_docs[1])))
+        # print(f"after choosing top-k docs:\n{candidate_docs}")
+        # print(f'scores:\n{candidate_scores}')
+        # print(f'size of docs:\n{[len(docs_tokens[doc]) for doc in candidate_docs]}')
+        # retrieve_sentences(candidate_docs, tokens_and_docs[0])
 
 
 if __name__ == "__main__":
     main()
 
-# sorting objects, copying speed
+
+# def get_top_idf_query_terms(terms: [str]) -> [str]:
+#     """
+#     Args:
+#         terms: terms of the query
+#     Returns: top idf terms (number of terms is TOP_IDF_QUERY_TERMS)
+#     """
+#     idf_scores = []
+#     for term in terms:
+#         if dictionary.get(term):
+#             idf_scores.append(dictionary[term].size)
+#     terms = [t for _, t in sorted(zip(idf_scores, terms), key=lambda tup: tup[0])]
+#     return terms[0:TOP_IDF_QUERY_TERMS]
 
 # def get_tok_count_dict(query: [str]):
 #    """

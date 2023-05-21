@@ -31,7 +31,7 @@ class LinkedList:
     def __init__(self):
         self.head: Node = None
         self.coll_freq = 0
-        self.size = 0  # idf
+        self._size = 0  # idf
 
     def insert(self, new_node: Node):
         self.coll_freq += new_node.count
@@ -72,3 +72,12 @@ class LinkedList:
         while curr_node:
             print(f"<doc_id: {curr_node.doc_id}, coll_freq: {curr_node.count}, indexes: {curr_node.indexes}>")
             curr_node = curr_node.next
+
+    @property
+    def size(self):  # tf
+        return self._size
+
+    @size.setter
+    def size(self, value):
+        self._size = value
+
